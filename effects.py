@@ -2,26 +2,30 @@ import pygame as pg
 from math import pi, acos
 from pygame.math import Vector2 as Vec2
 
+
 class TileAnimation(pg.sprite.Sprite):
     def __init__(self):
         super().__init__()
 
-    def update(self, deltat=1/60):
+    def update(self, deltat=1 / 60):
         self.kill()
 
     def get_offset(self, tile) -> float:
         return 0
+
 
 def smoothstep(le, re, x):
     clamp = lambda x: max(0, min(1, x))
     x = clamp((x - le) / (re - le))
     return x**2 * (3 - 2 * x)
 
+
 def two_smoothstep(le, re, x):
     if x < 0:
         return smoothstep(le, 0, x)
     else:
         return 1 - smoothstep(0, re, x)
+
 
 class DirectedShockwave(TileAnimation):
     def __init__(
@@ -30,11 +34,11 @@ class DirectedShockwave(TileAnimation):
         speed=3,
         max_duration=4,
         trail=2,
-        ahead: float =1,
+        ahead: float = 1,
         dampening=0.3,
         amplitude=1,
-        width = pi/4,
-        dir = Vec2(0,0)
+        width=pi / 4,
+        dir=Vec2(0, 0),
     ):
         super().__init__()
         self.speed = speed
@@ -47,7 +51,8 @@ class DirectedShockwave(TileAnimation):
         self.amplitude = amplitude
         self.width = width
         self.dir = dir
-    def update(self, deltat=1/60):
+
+    def update(self, deltat=1 / 60):
         self.time += deltat * self.speed
         self.amplitude = max(0, self.amplitude - self.dampening * deltat)
         if self.amplitude <= 1e-14:
@@ -56,11 +61,23 @@ class DirectedShockwave(TileAnimation):
     def diff_angle(self, a: Vec2, b: Vec2):
         if a.length() <= 1e-13 or b.length() <= 1e-13:
             return 0.0
-        return acos(a.dot(b)/(a.length()*b.length()))
+        return acos(a.dot(b) / (a.length() * b.length()))
+
     def get_offset(self, tile):
         t = Vec2(tile)
         d = (t - self.center).length()
-        return -self.amplitude * two_smoothstep(-self.trail, self.ahead, d - self.time) * (1-smoothstep(0, self.width, self.diff_angle(self.dir, t-self.center)))
+        return (
+            -self.amplitude
+            * two_smoothstep(-self.trail, self.ahead, d - self.time)
+            * (
+                1
+                - smoothstep(0, self.width, self.diff_angle(self.dir, t - self.center))
+            )
+        )
+
+    def __str__(self):
+        return "DirectedShockwave"
+
 
 class CrossWaveAnimation(TileAnimation):
     def __init__(
@@ -69,9 +86,10 @@ class CrossWaveAnimation(TileAnimation):
         speed=3,
         max_duration=4,
         trail=2,
-        ahead: float =1,
+        ahead: float = 1,
         dampening=0.3,
         amplitude=1,
+        **kwargs
     ):
         super().__init__()
         self.speed = speed
@@ -83,7 +101,7 @@ class CrossWaveAnimation(TileAnimation):
         self.dampening = dampening
         self.amplitude = amplitude
 
-    def update(self, deltat=1/60):
+    def update(self, deltat=1 / 60):
         self.time += deltat * self.speed
         self.amplitude = max(0, self.amplitude - self.dampening * deltat)
         if self.amplitude <= 1e-14:
@@ -96,9 +114,15 @@ class CrossWaveAnimation(TileAnimation):
         t = Vec2(tile)
         d = (t - self.center).length()
         if self.is_on_cross(tile):
-            return -self.amplitude * two_smoothstep(-self.trail, self.ahead, d - self.time)
+            return -self.amplitude * two_smoothstep(
+                -self.trail, self.ahead, d - self.time
+            )
         else:
             return 0.0
+
+    def __str__(self):
+        return "CrossWave"
+
 
 class CircularWaveAnimation(TileAnimation):
     def __init__(
@@ -106,10 +130,11 @@ class CircularWaveAnimation(TileAnimation):
         epicenter=(0, 0),
         speed=3,
         max_duration=4,
-        trail: float =2,
-        ahead: float =1,
+        trail: float = 2,
+        ahead: float = 1,
         dampening=0.3,
         amplitude=1,
+        **kwargs
     ):
         super().__init__()
         self.speed = speed
@@ -121,7 +146,7 @@ class CircularWaveAnimation(TileAnimation):
         self.dampening = dampening
         self.amplitude = amplitude
 
-    def update(self, deltat=1/60):
+    def update(self, deltat=1 / 60):
         self.time += deltat * self.speed
         self.amplitude = max(0, self.amplitude - self.dampening * deltat)
         if self.amplitude <= 1e-14:
@@ -132,3 +157,6 @@ class CircularWaveAnimation(TileAnimation):
         d = (t - self.center).length()
         val = -self.amplitude * two_smoothstep(-self.trail, self.ahead, d - self.time)
         return val
+
+    def __str__(self):
+        return "CircularWave"

@@ -1,24 +1,34 @@
 import os
 import pygame as pg
 
+
 class SpriteCatalogue:
     def __init__(self):
         self.scale = 1.0
-        self.orig_sprites = []
+        self.raw_sprites = []
         self.scaled_sprites = []
         self.flipped_sprites = []
 
-    def add_sprites(self, dir, ran, pattern="sprite{}", ext="png"):
-        for i in ran:
-            filename = os.path.join(dir, pattern.format(i) + "." + ext)
-            self.orig_sprites.append(self.load_image(filename))
+    def add_sprites(self, filenames):
+        num_before = len(self.raw_sprites)
+        for name in filenames:
+            self.raw_sprites.append(self.load_image(name))
+        num_after = len(self.raw_sprites)
+        # Update cached sprites
         self.scale_catalogue()
+        return range(num_before, num_after)
+
+    # def add_sprites(self, dir, ran, pattern="sprite{}", ext="png"):
+    #    for i in ran:
+    #        filename = os.path.join(dir, pattern.format(i) + "." + ext)
+    #        self.orig_sprites.append(self.load_image(filename))
+    #    self.scale_catalogue()
 
     def scale_catalogue(self, scale=1.0):
         self.scale = scale
         self.scaled_sprites = []
         self.flipped_sprites = []
-        for s in self.orig_sprites:
+        for s in self.raw_sprites:
             scaled = self.scale_uniform(s, scale)
             self.scaled_sprites.append(scaled)
             self.flipped_sprites.append(pg.transform.flip(scaled, flip_x=1, flip_y=0))
