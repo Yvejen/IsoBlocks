@@ -2,10 +2,10 @@ import pygame as pg
 import os
 from pygame.math import Vector2 as Vec2
 from math import pi, sin, cos, floor
-import glob
 from dataclasses import dataclass
+from enum import Enum
 from effects import DirectedShockwave, CrossWaveAnimation, CircularWaveAnimation
-from sprites import SpriteCatalogue
+from sprites import SpriteCatalogue, Sprite, AnimatedSprite, Cycle
 
 WIDTH = 800
 HEIGHT = 600
@@ -26,26 +26,6 @@ data_path = os.path.join(os.path.dirname(__file__), "data")
 #    return x**4 - 2 * x**2 + 1
 
 
-class Cycle:
-    def __init__(self, start=0, modulus=2, offset=0):
-        self.val = start
-        self.modulus = modulus
-        self.offset = offset
-
-    def cycle_up(self):
-        self.val += 1
-        if self.val == self.modulus:
-            self.val = 0
-
-    def cycle_down(self):
-        if self.val == 0:
-            self.val = self.modulus
-        self.val -= 1
-
-    def get(self):
-        return self.val + self.offset
-
-
 class IsoTiles:
     MAXCNT = 60
 
@@ -58,9 +38,9 @@ class IsoTiles:
         self.animations = pg.sprite.Group()
         self.itiles = itiles
         self.jtiles = jtiles
-        self.dynamic_tiles = {}
         self.framecnt = self.MAXCNT
         self.orig: Vec2 = Vec2(0, 0)
+        self.flipped = set()
 
     def set_origin(self, orig: Vec2):
         self.orig = orig
@@ -73,7 +53,7 @@ class IsoTiles:
     def draw(self, surf):
         for tileindex in self.tile_type.keys():
             v = self.tile_to_screen(tileindex)
-            if sprite := self.get_type_sprite(self.get_tile_type(tileindex)):
+            if sprite := self.get_tile_sprite(tileindex):
                 surf.blit(sprite, pg.Rect(v.x, v.y, 0, 0))
 
     def get_type_sprite(self, type: None | int):
@@ -88,11 +68,9 @@ class IsoTiles:
     def get_tile_sprite(self, tile) -> None | pg.Surface:
         if not self.is_valid_tile(tile):
             return None
-        if tile in self.dynamic_tiles:
-            idx = self.dynamic_tiles[tile].get()
         else:
             idx = self.tile_type[tile]
-        return self.sprites[idx]
+        return self.sprites.get(idx, tile in self.flipped)
 
     def tile_to_screen(self, tile):
         return self.iso_to_screen(tile, self.get_tile_offset(tile))
@@ -134,13 +112,15 @@ class IsoTiles:
         if self.is_valid_tile(tile):
             self.tile_type[tile] = ttype
 
+    def flip_tile(self, tile):
+        if self.is_valid_tile(tile):
+            if tile in self.flipped:
+                self.flipped.remove(tile)
+            else:
+                self.flipped.add(tile)
+
     def update(self):
         self.animations.update()
-        self.framecnt -= 1
-        if self.framecnt == 0:
-            for c in self.dynamic_tiles.values():
-                c.cycle()
-            self.framecnt = self.MAXCNT
 
 
 class Game:
@@ -152,14 +132,29 @@ class Game:
         self.running = True
         self.clock = pg.time.Clock()
         self.sprite_cat = SpriteCatalogue()
-        self.sprite_cat.add_sprites(
-            self.create_resource_list(data_path, range(1, 6), pattern="tile{}")
+        self.max_types = (
+            max(
+                self.sprite_cat.add_sprites(
+                    *[
+                        Sprite.from_file(fname)
+                        for fname in self.create_resource_list(
+                            data_path, range(1, 3), pattern="tile{}"
+                        )
+                    ],
+                    AnimatedSprite.from_files(
+                        self.create_resource_list(
+                            data_path, range(3, 5), pattern="tile{}"
+                        )
+                    ),
+                )
+            )
+            + 1
         )
         self.tiles = IsoTiles(10, 10, self.sprite_cat)
         self.pos = Vec2(0, 0)
         self.font_size = 16
         self.font = pg.font.SysFont("DejaVu", size=self.font_size)
-        self.mode = 0
+        self.mode = Cycle(0, 2, 0)
         self.selected_effect = Cycle(start=0, modulus=3, offset=0)
         self.effect_types = [
             DirectedShockwave,
@@ -167,6 +162,7 @@ class Game:
             CircularWaveAnimation,
         ]
         self.zoom = 1.0
+        self.editor_block_type = Cycle(0, self.max_types, 0)
 
     @staticmethod
     def create_resource_list(dir, ran, pattern="sprite{}", ext="png"):
@@ -186,7 +182,7 @@ class Game:
     def draw_ui(self):
         menu_top = 20
         self.draw_text(WIDTH - 60, menu_top, f"FPS: {int(self.clock.get_fps())}")
-        match self.mode:
+        match self.mode.get():
             case 0:
                 self.draw_text(20, menu_top, "Effect Mode")
                 menu_top += self.font_size
@@ -199,20 +195,35 @@ class Game:
                     menu_top,
                     f"Selected Effect {self.effect_types[self.selected_effect.get()]}",
                 )
+                menu_top += self.font_size
+                self.draw_text(20, menu_top, "Mode Switch: M")
+            case 1:
+                self.draw_text(20, menu_top, "Build Mode")
+                menu_top += 20
+                self.draw_text(20, menu_top, "Scrollwheel: Move Block Up/Down")
+                menu_top += 20
+                self.draw_text(20, menu_top, "Change Block Type: RMB")
+                menu_top += 20
+                self.draw_text(20, menu_top, "Rotate Block: R")
 
     def render(self):
-
         self.tiles.set_origin(-self.pos)
         self.window.fill((0, 80, 180))
         self.tiles.draw(self.window)
         self.draw_ui()
 
     def update(self):
+        self.sprite_cat.update()
         for e in pg.event.get():
             if e.type == pg.QUIT:
                 self.running = False
-            match self.mode:
+            if e.type == pg.KEYDOWN and e.key == pg.K_m:
+                self.mode.cycle_down()
+            match self.mode.get():
                 case 0:
+                    if e.type == pg.MOUSEWHEEL:
+                        self.zoom += e.y * 0.1
+                        self.tiles.set_scale(self.zoom)
                     if e.type == pg.MOUSEBUTTONDOWN and e.button == 1:
                         pos = pg.mouse.get_pos()
                         tile = self.tiles.coord_to_tile(Vec2(pos))
@@ -228,6 +239,27 @@ class Game:
                         self.selected_effect.cycle_up()
                     if e.type == pg.KEYDOWN and e.key == pg.K_p:
                         self.selected_effect.cycle_down()
+                case 1:
+                    if e.type == pg.MOUSEWHEEL:
+                        offset = e.y * 0.1
+                        pos = pg.mouse.get_pos()
+                        tile = self.tiles.coord_to_tile(Vec2(pos))
+                        self.tiles.set_tile_offset(
+                            tile, self.tiles.get_tile_offset(tile) + offset
+                        )
+                    if e.type == pg.MOUSEBUTTONDOWN and e.button == 3:
+                        pos = pg.mouse.get_pos()
+                        tile = self.tiles.coord_to_tile(Vec2(pos))
+                        if self.tiles.is_valid_tile(tile):
+                            type = self.tiles.tile_type[tile]
+                            type += 1
+                            type %= self.max_types
+                            self.tiles.tile_type[tile] = type
+                    if e.type == pg.KEYDOWN and e.key == pg.K_r:
+                        pos = pg.mouse.get_pos()
+                        tile = self.tiles.coord_to_tile(Vec2(pos))
+                        if self.tiles.is_valid_tile(tile):
+                            self.tiles.flip_tile(tile)
             # if e.type == pg.MOUSEBUTTONDOWN and e.button == 1:
             #    pos = pg.mouse.get_pos()
             #    tile = self.tiles.coord_to_tile(Vec2(pos))
@@ -246,9 +278,6 @@ class Game:
             #    tile = self.tiles.coord_to_tile(Vec2(pos))
             #    if self.tiles.is_valid_tile(tile):
             #        self.tiles.tile_type[tile] += 1
-            if e.type == pg.MOUSEWHEEL:
-                self.zoom += e.y * 0.1
-                self.tiles.set_scale(self.zoom)
 
         # Camera Movement
         pressed = pg.key.get_pressed()
