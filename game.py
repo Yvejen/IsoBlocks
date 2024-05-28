@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 from effects import DirectedShockwave, CrossWaveAnimation, CircularWaveAnimation
 from sprites import SpriteCatalogue, Sprite, AnimatedSprite, Cycle
+import json
 
 WIDTH = 800
 HEIGHT = 600
@@ -29,7 +30,7 @@ data_path = os.path.join(os.path.dirname(__file__), "data")
 class IsoTiles:
     MAXCNT = 60
 
-    def __init__(self, itiles, jtiles, sprites: SpriteCatalogue):
+    def __init__(self, sprites: SpriteCatalogue):
         self.sprites: SpriteCatalogue = sprites
         self.s_w = self.sprites[0].get_width()
         self.s_h = self.sprites[0].get_height()
@@ -37,11 +38,28 @@ class IsoTiles:
         #self.tile_type = {(i, j): 0 for i in range(itiles) for j in range(jtiles)}
         self.tile_type = {}
         self.animations = pg.sprite.Group()
-        self.itiles = itiles
-        self.jtiles = jtiles
         self.framecnt = self.MAXCNT
         self.orig: Vec2 = Vec2(0, 0)
         self.flipped = set()
+
+
+    def to_json(self):
+        tile_loc = list(self.tile_type.keys())
+        tile_t   = list(self.tile_type.values())
+        flipped = list(self.flipped)
+        s = {"tile_loc" : tile_loc, "tile_type" : tile_t, "flipped" : flipped}
+        return json.dumps(s)
+
+    @classmethod
+    def from_json(cls, sprites: SpriteCatalogue, json_str: str):
+        itiles = cls(sprites)
+        d = json.loads(json_str)
+        for k,v, in zip(d["tile_loc"], d["tile_type"]):
+            ktup = (k[0],k[1])
+            itiles.tile_type[ktup] = v
+        for f in d["flipped"]:
+            itiles.flipped.add((f[0],f[1]))
+        return itiles
 
     def set_origin(self, orig: Vec2):
         self.orig = orig
@@ -142,8 +160,9 @@ class IsoTiles:
 
 
 class Game:
-    def __init__(self):
+    def __init__(self, save="world.json"):
         pg.init()
+        self.save = save
         print(f"Data Path: {data_path}")
         self.window = pg.display.set_mode((WIDTH, HEIGHT))
         pg.display.set_caption("Isometric")
@@ -168,7 +187,7 @@ class Game:
             )
             + 1
         )
-        self.tiles = IsoTiles(10, 10, self.sprite_cat)
+        self.tiles = IsoTiles(self.sprite_cat)
         self.pos = Vec2(0, 0)
         self.font_size = 16
         self.font = pg.font.SysFont("DejaVu", size=self.font_size)
@@ -246,6 +265,17 @@ class Game:
                 self.running = False
             if e.type == pg.KEYDOWN and e.key == pg.K_m:
                 self.mode.cycle_down()
+
+            if e.type == pg.KEYDOWN and e.key == pg.K_o:
+                print("Saving")
+                jstr = self.tiles.to_json()
+                with open(self.save, "w") as sfile:
+                    sfile.write(jstr)
+            if e.type == pg.KEYDOWN and e.key == pg.K_l:
+                print("Loading")
+                with open(self.save, "r") as sfile:
+                    jstr = sfile.read()
+                self.tiles = IsoTiles.from_json(self.sprite_cat, jstr)
             match self.mode.get():
                 case 0:
                     if e.type == pg.MOUSEWHEEL:
