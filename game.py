@@ -34,7 +34,8 @@ class IsoTiles:
         self.s_w = self.sprites[0].get_width()
         self.s_h = self.sprites[0].get_height()
         self.tile_offsets = {}
-        self.tile_type = {(i, j): 0 for i in range(itiles) for j in range(jtiles)}
+        #self.tile_type = {(i, j): 0 for i in range(itiles) for j in range(jtiles)}
+        self.tile_type = {}
         self.animations = pg.sprite.Group()
         self.itiles = itiles
         self.jtiles = jtiles
@@ -51,16 +52,36 @@ class IsoTiles:
         self.s_h = self.sprites[0].get_height()
 
     def draw(self, surf):
-        for tileindex in self.tile_type.keys():
+        for tileindex in sorted(self.tile_type.keys()):
             v = self.tile_to_screen(tileindex)
             if sprite := self.get_tile_sprite(tileindex):
                 surf.blit(sprite, pg.Rect(v.x, v.y, 0, 0))
+
+    def draw_block_at(self, surf, pos, block_type, flipped=False, trans=False):
+        if sprite := self.sprites.get(block_type, flipped, trans):
+            surf.blit(sprite, pg.Rect(pos.x, pos.y, 0, 0))
 
     def get_type_sprite(self, type: None | int):
         if type is None:
             return None
         else:
             return self.sprites[type]
+
+    def add_tile(self, idx, type, flipped):
+        self.tile_type[idx] = type
+        if flipped:
+            self.flipped.add(idx)
+        else:
+            try:
+                self.flipped.remove(idx)
+            except KeyError:
+                pass
+
+    def remove_tile(self, idx):
+        try:
+            del self.tile_type[idx]
+        except KeyError:
+            pass
 
     def get_tile_type(self, tileindex) -> None | int:
         return self.tile_type.get(tileindex, None)
@@ -82,15 +103,12 @@ class IsoTiles:
             self.orig.y + 0.25 * self.s_h * (i + j + offset),
         )
 
-    def coord_to_tile(self, v: Vec2):
+    def screen_to_iso(self, v: Vec2):
         h1 = (v.x - self.orig.x) * 2 / self.s_w
         h2 = 4 / self.s_h * (v.y - self.orig.y)
         i = floor((h1 + h2) / 2)
         j = floor((h2 - h1) / 2)
-        if self.is_valid_tile((i, j)):
-            return (i, j)
-        else:
-            return (-1, -1)
+        return (i,j)
 
     def is_valid_tile(self, tile):
         return tile in self.tile_type
@@ -163,6 +181,7 @@ class Game:
         ]
         self.zoom = 1.0
         self.editor_block_type = Cycle(0, self.max_types, 0)
+        self.editor_flipped = False
 
     @staticmethod
     def create_resource_list(dir, ran, pattern="sprite{}", ext="png"):
@@ -178,6 +197,11 @@ class Game:
         dest.x = x
         dest.y = y
         self.window.blit(surf, dest)
+
+    def draw_block_placer(self, pos):
+        snap = self.tiles.iso_to_screen(self.tiles.screen_to_iso(pos))
+        self.tiles.draw_block_at(self.window, snap, self.editor_block_type.get(), self.editor_flipped, True)
+
 
     def draw_ui(self):
         menu_top = 20
@@ -205,6 +229,9 @@ class Game:
                 self.draw_text(20, menu_top, "Change Block Type: RMB")
                 menu_top += 20
                 self.draw_text(20, menu_top, "Rotate Block: R")
+                # This should be handled elsewhere
+                pos = Vec2(pg.mouse.get_pos())
+                self.draw_block_placer(pos)
 
     def render(self):
         self.tiles.set_origin(-self.pos)
@@ -226,7 +253,7 @@ class Game:
                         self.tiles.set_scale(self.zoom)
                     if e.type == pg.MOUSEBUTTONDOWN and e.button == 1:
                         pos = pg.mouse.get_pos()
-                        tile = self.tiles.coord_to_tile(Vec2(pos))
+                        tile = self.tiles.screen_to_iso(Vec2(pos))
                         effect = self.effect_types[self.selected_effect.get()](
                             amplitude=1.5,
                             ahead=0.8,
@@ -240,33 +267,35 @@ class Game:
                     if e.type == pg.KEYDOWN and e.key == pg.K_p:
                         self.selected_effect.cycle_down()
                 case 1:
-                    if e.type == pg.MOUSEWHEEL:
-                        offset = e.y * 0.1
-                        pos = pg.mouse.get_pos()
-                        tile = self.tiles.coord_to_tile(Vec2(pos))
-                        self.tiles.set_tile_offset(
-                            tile, self.tiles.get_tile_offset(tile) + offset
-                        )
-                    if e.type == pg.MOUSEBUTTONDOWN and e.button == 3:
-                        pos = pg.mouse.get_pos()
-                        tile = self.tiles.coord_to_tile(Vec2(pos))
-                        if self.tiles.is_valid_tile(tile):
-                            type = self.tiles.tile_type[tile]
-                            type += 1
-                            type %= self.max_types
-                            self.tiles.tile_type[tile] = type
+                    pos = Vec2(pg.mouse.get_pos())
+                   # if e.type == pg.MOUSEWHEEL:
+                   #     offset = e.y * 0.1
+                   #     tile = self.tiles.screen_to_iso(Vec2(pos))
+                   #     self.tiles.set_tile_offset(
+                   #         tile, self.tiles.get_tile_offset(tile) + offset
+                   #     )
+                    if e.type == pg.MOUSEWHEEL and e.y > 0:
+                        self.editor_block_type.cycle_up()
+                    if e.type == pg.MOUSEWHEEL and e.y < 0:
+                        self.editor_block_type.cycle_down()
+                        
+                    if e.type == pg.MOUSEBUTTONDOWN and e.button == 1:
+                        self.tiles.add_tile(self.tiles.screen_to_iso(pos), self.editor_block_type.get(), self.editor_flipped)
                     if e.type == pg.KEYDOWN and e.key == pg.K_r:
-                        pos = pg.mouse.get_pos()
-                        tile = self.tiles.coord_to_tile(Vec2(pos))
+                        self.editor_flipped = not self.editor_flipped
+                    if e.type == pg.MOUSEBUTTONDOWN and e.button == 3:
+                        self.tiles.remove_tile(self.tiles.screen_to_iso(pos))
+                    if e.type == pg.KEYDOWN and e.key == pg.K_r:
+                        tile = self.tiles.screen_to_iso(pos)
                         if self.tiles.is_valid_tile(tile):
                             self.tiles.flip_tile(tile)
             # if e.type == pg.MOUSEBUTTONDOWN and e.button == 1:
             #    pos = pg.mouse.get_pos()
-            #    tile = self.tiles.coord_to_tile(Vec2(pos))
+            #    tile = self.tiles.screen_to_iso(Vec2(pos))
             #    self.tiles.set_tile_offset(tile, self.tiles.get_tile_offset(tile)+0.2)
             # if e.type == pg.MOUSEWHEEL:
             #    pos = pg.mouse.get_pos()
-            #    tile = self.tiles.coord_to_tile(Vec2(pos))
+            #    tile = self.tiles.screen_to_iso(Vec2(pos))
             #    self.tiles.set_tile_offset(
             #        tile, self.tiles.get_tile_offset(tile) - 0.2 * e.y
             #    )
@@ -275,7 +304,7 @@ class Game:
             #    angle %= 2*pi
             # if e.type == pg.MOUSEBUTTONDOWN and e.button == 3:
             #    pos = pg.mouse.get_pos()
-            #    tile = self.tiles.coord_to_tile(Vec2(pos))
+            #    tile = self.tiles.screen_to_iso(Vec2(pos))
             #    if self.tiles.is_valid_tile(tile):
             #        self.tiles.tile_type[tile] += 1
 

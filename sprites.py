@@ -38,6 +38,13 @@ class Cycle:
     def get(self):
         return self.val + self.offset
 
+def make_trans(img: pg.Surface, alpha: int):
+    s = img.copy()
+    tmp = pg.Surface(img.get_rect().size, pg.SRCALPHA)
+    tmp.fill(pg.Color(255,255,255, alpha))
+    s.blit(tmp, (0,0), special_flags=pg.BLEND_RGBA_MULT)
+    return s
+    
 
 class Sprite(pg.sprite.Sprite):
     def __init__(self, image, global_scale=1.0, size=1.0):
@@ -52,15 +59,22 @@ class Sprite(pg.sprite.Sprite):
         self.global_scale = global_scale
         self.scaled = scale_uniform(self.raw, self.size * self.global_scale)
         self.flipped = pg.transform.flip(self.scaled, flip_x=True, flip_y=False)
+        self.trans = make_trans(self.scaled, 128)
+        self.trans_flipped = pg.transform.flip(self.trans, flip_x=True, flip_y=False)
 
-    def get(self, flipped=False):
-        if flipped:
-            return self.flipped
-        else:
+    def get(self, flipped=False, trans=False):
+        if not flipped and not trans:
             return self.scaled
+        elif not flipped and trans:
+            return self.trans
+        elif flipped and not trans:
+            return self.flipped
+        elif flipped and trans:
+            return self.trans_flipped
 
     def update(self):
         pass
+
 
     @classmethod
     def from_file(cls, filename, global_scale=1.0, size=1.0):
@@ -71,16 +85,11 @@ class AnimatedSprite(Sprite):
     def __init__(self, images, global_scale=1.0, size=1.0, updatecnt=60):
         super().__init__(images[0], global_scale, size)
         self.frames = images
-        self.updatecnt = updatecnt
-        self.count = 0
         self.cycle = Cycle(0, len(images))
         self.paused = False
 
     def update(self):
         if not self.paused:
-            self.count += 1
-        if self.count == self.updatecnt:
-            self.count = 0
             self.cycle.cycle_up()
             self.raw = self.frames[self.cycle.get()]
             self.set_scale(self.global_scale)
@@ -101,8 +110,10 @@ class AnimatedSprite(Sprite):
 
 
 class SpriteCatalogue:
-    def __init__(self):
+    def __init__(self, updatecnt=120):
+        self.updatecnt = updatecnt
         self.global_scale = 1.0
+        self.count = 0
         self.sprites: list[Sprite] = []
 
     def add_sprites(self, *sprites):
@@ -122,11 +133,14 @@ class SpriteCatalogue:
         return self.get(idx)
 
     def update(self):
-        for s in self.sprites:
-            s.update()
+        self.count += 1
+        if self.count >= self.updatecnt:
+            self.count = 0
+            for s in self.sprites:
+                s.update()
 
-    def get(self, idx, flipped=False):
-        return self.sprites[idx].get(flipped)
+    def get(self, idx, flipped=False, trans=False):
+        return self.sprites[idx].get(flipped, trans)
 
 
 #    def get_width(self):
