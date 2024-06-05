@@ -38,13 +38,14 @@ class Cycle:
     def get(self):
         return self.val + self.offset
 
+
 def make_trans(img: pg.Surface, alpha: int):
     s = img.copy()
     tmp = pg.Surface(img.get_rect().size, pg.SRCALPHA)
-    tmp.fill(pg.Color(255,255,255, alpha))
-    s.blit(tmp, (0,0), special_flags=pg.BLEND_RGBA_MULT)
+    tmp.fill(pg.Color(255, 255, 255, alpha))
+    s.blit(tmp, (0, 0), special_flags=pg.BLEND_RGBA_MULT)
     return s
-    
+
 
 class Sprite(pg.sprite.Sprite):
     def __init__(self, image, global_scale=1.0, size=1.0):
@@ -74,7 +75,6 @@ class Sprite(pg.sprite.Sprite):
 
     def update(self):
         pass
-
 
     @classmethod
     def from_file(cls, filename, global_scale=1.0, size=1.0):
