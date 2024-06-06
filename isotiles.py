@@ -45,6 +45,7 @@ class IsoTiles:
     def set_origin(self, orig: Vec2):
         self.orig = orig
 
+
     def set_scale(self, scale=1.0):
         self.sprites.scale_catalogue(scale)
         self.s_w = self.sprites[0].get_width()
@@ -190,6 +191,18 @@ class Building(pg.sprite.Sprite):
         srf.blit(img, dst)
         self.bar.draw(srf, pos)
 
+    def check_collisions(self, proj_grp):
+        for p in proj_grp.copy():
+            # Snap to tile coord
+            tile = (floor(p.coord.x), floor(p.coord.y)+1)
+            print(f"Tile {tile} City {self.coord}")
+            if tile == self.coord:
+                p.kill()
+                self.damage(20)
+
+    def update(self, proj_grp):
+        self.check_collisions(proj_grp)
+
     def damage(self, dmg):
         self.building_hp -= dmg
         self.bar.set_ratio(self.building_hp / self.MAX_HP)
@@ -202,3 +215,4 @@ class Building(pg.sprite.Sprite):
         )
         self.iso_tiles.animations.add(effect)
         self.kill()
+

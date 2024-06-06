@@ -69,8 +69,9 @@ class Game:
         self.editor_block_type = Cycle(0, self.max_types, 0)
         self.editor_flipped = False
         self.editor_city = Building(self.building_cat, self.tiles, (0, 0))
-
-        # self.player = Robot()
+        
+        self.proj_grp = pg.sprite.Group()
+        self.player = Player(self.tiles, where=Vec2(0,0), proj_grp=self.proj_grp)
 
     @staticmethod
     def create_resource_list(dir, ran, pattern="sprite{}", ext="png"):
@@ -130,6 +131,18 @@ class Game:
             case 2:
                 self.draw_text(20, 10, "City Place Mode\n" "LMB: Place City\n")
                 self.draw_city_placer(pos)
+            case 3:
+                self.draw_text(20,10,"Play Mode")
+
+    # Given two groups of Elements with a coord member, check if they are on the same isotiles
+    # Returns a list of tuples of colliding elements
+    #def check_collision(self, grp1: pg.sprite.Group, grp2, tiles):
+    #    collision_pairs = []
+    #    for g1 in grp1:
+    #        for g2 in grp2:
+    #            if g1.coords == g2.coords:
+    #                collision_pairs.append((g1,g2))
+    #    return collision_pairs
 
     def render(self):
         # Update relative position
@@ -138,6 +151,10 @@ class Game:
         self.tiles.draw(self.window)
         for c in self.cities:
             c.draw(self.window)
+        for s in self.proj_grp:
+            s.scale = self.zoom
+            s.draw(self.window)
+        self.player.draw(self.window)
         self.draw_ui(Vec2(pg.mouse.get_pos()))
 
     # Save the current game state to a file that can be loaded with the load method
@@ -152,12 +169,14 @@ class Game:
         with open(filename, "r") as sfile:
             jstr = sfile.read()
         self.tiles = IsoTiles.from_json(self.sprite_cat, jstr)
+        self.player.iso_tiles = self.tiles
 
     def mode_effect_controls(self, e):
         if e.type == pg.MOUSEWHEEL:
-            self.zoom += e.y * 0.1
+            self.zoom = max(0,min(self.zoom + e.y * 0.1,2))
             self.sprite_cat.scale_catalogue(self.zoom)
             self.building_cat.scale_catalogue(self.zoom)
+            self.player.scale = self.zoom
         if e.type == pg.MOUSEBUTTONDOWN and e.button == 1:
             pos = pg.mouse.get_pos()
             tile = self.tiles.screen_to_iso(Vec2(pos))
@@ -202,6 +221,7 @@ class Game:
     def mode_city_build_controls(self, e):
         if e.type == pg.MOUSEBUTTONDOWN and e.button == 1:
             # Editor item location gets updated every frame
+            self.editor_city.iso_tiles = self.tiles
             self.cities.add(self.editor_city)
             self.editor_city = Building(
                 self.building_cat, self.tiles, self.editor_city.coord
@@ -220,8 +240,12 @@ class Game:
         if pressed[pg.K_s]:
             self.pos.y += speed
 
+    def mode_play_controls(self, e):
+        self.player.input(e)
+
     def update(self):
         self.sprite_cat.update()
+        self.proj_grp.update()
         for e in pg.event.get():
             if e.type == pg.QUIT:
                 self.running = False
@@ -234,26 +258,13 @@ class Game:
                     self.mode_build_controls(e)
                 case GameState.CITY_MODE.value:
                     self.mode_city_build_controls(e)
-            # if e.type == pg.MOUSEBUTTONDOWN and e.button == 1:
-            #    pos = pg.mouse.get_pos()
-            #    tile = self.tiles.screen_to_iso(Vec2(pos))
-            #    self.tiles.set_tile_offset(tile, self.tiles.get_tile_offset(tile)+0.2)
-            # if e.type == pg.MOUSEWHEEL:
-            #    pos = pg.mouse.get_pos()
-            #    tile = self.tiles.screen_to_iso(Vec2(pos))
-            #    self.tiles.set_tile_offset(
-            #        tile, self.tiles.get_tile_offset(tile) - 0.2 * e.y
-            #    )
-            # if e.type == pg.MOUSEWHEEL:
-            #    angle += e.y * 0.1
-            #    angle %= 2*pi
-            # if e.type == pg.MOUSEBUTTONDOWN and e.button == 3:
-            #    pos = pg.mouse.get_pos()
-            #    tile = self.tiles.screen_to_iso(Vec2(pos))
-            #    if self.tiles.is_valid_tile(tile):
-            #        self.tiles.tile_type[tile] += 1
-        if self.mode.get() in {0, 2}:
+                case GameState.PLAY_MODE.value:
+                    self.mode_play_controls(e)
+        if self.mode.get() != GameState.PLAY_MODE.value:
             self.camera_control()
+        if self.mode.get() == GameState.PLAY_MODE.value:
+            self.player.update()
+        self.cities.update(self.proj_grp)
         self.tiles.update()
 
     def run(self):
@@ -263,42 +274,111 @@ class Game:
             pg.display.update()
             self.clock.tick(60)
 
-
-class Robot(pg.sprite.Sprite):
-    def __init__(self, idle, walking, cmnd):
+class Projectile(pg.sprite.Sprite):
+    SIZE = 10
+    def __init__(self, direction: Vec2, pos: Vec2, tiles, scale=1.0):
         super().__init__()
-        self.idle_animation: AnimatedSprite = idle
-        self.walking_animation: AnimatedSprite = walking
-        self.active_animation = self.idle_animation
-        self.cmnd = cmnd
-        self.walking = 0
-        self.updatecnt = 60
-        self.cnt = 0
-        self.pos = Vec2(0, 0)
-        self.orig = Vec2(0, 0)
+        self.dir = direction
+        self.scale = scale
+        self.coord = pos
+        self.tiles: IsoTiles = tiles
 
-    def set_origin(self, origin: Vec2):
-        self.orig = origin
-
-    def set_scale(self, global_scale=1.0):
-        self.idle_animation.set_scale(global_scale)
-        self.walking_animation.set_scale(global_scale)
-
-    def update(self, *args):
-        # We need a better meachnism for handling sprite timings
-        if self.cnt >= self.updatecnt:
-            self.cnt = 0
-            self.active_animation.update()
-        self.cmnd(self, *args)
-        self.cnt += 1
+    def update(self):
+        self.coord += TAU * self.dir
+        at = self.tiles.iso_to_screen(self.coord)
+        if at.x > WIDTH or at.x < 0 or at.y > HEIGHT or at.y < 0:
+            self.kill()
 
     def draw(self, srf):
-        img = self.active_animation.get()
-        dst = img.get_rect()
-        dpos = self.orig + self.pos
-        dst.x = int(dpos.x)
-        dst.y = int(dpos.y)
-        srf.blit(img, dst)
+        at = self.tiles.iso_to_screen(self.coord)
+        pg.draw.circle(srf, (200,0,0), at, self.scale * self.SIZE)
+
+class Player(pg.sprite.Sprite):
+    ORIG_WIDTH = 20
+    ORIG_HEIGHT = 40
+    CD_MAX = 60
+    def __init__(self, tiles, proj_grp, where=Vec2(0,0)):
+        self.coord: Vec2 = Vec2(where)
+        self.iso_tiles = tiles
+        self.scale = 1.0
+        self.speed = 0.1
+        self.cd = self.CD_MAX
+        self.proj_grp = proj_grp
+        self.facing = 0
+
+    def draw(self, srf):
+        pos = self.iso_tiles.iso_to_screen(self.coord)
+        col = pg.Color(128,128,60)
+        dst = pg.Rect((int(pos.x),int(pos.y)), (self.scale*self.ORIG_WIDTH, self.scale*self.ORIG_HEIGHT))
+        pg.draw.rect(srf, col, dst)
+
+    def update(self):
+        self.moveupdate()
+        self.cd = max(0, self.cd - 1)
+
+    def shoot(self):
+        if self.cd <= 0:
+            # Shoot projectile
+            facings = [Vec2(1,0), Vec2(0,1), Vec2(-1,0), Vec2(0,-1)]
+            self.proj_grp.add(Projectile(facings[self.facing], self.coord.copy(), self.iso_tiles, self.scale))
+
+    def input(self, e):
+        if e.type == pg.KEYDOWN and e.key == pg.K_SPACE:
+            self.shoot()
+        
+
+    def moveupdate(self):
+        pressed = pg.key.get_pressed()
+        if pressed[pg.K_a]:
+            self.coord.x -= self.speed
+            self.facing = 2
+        if pressed[pg.K_d]:
+            self.coord.x += self.speed
+            self.facing = 0
+        if pressed[pg.K_w]:
+            self.coord.y -= self.speed
+            self.facing = 3
+        if pressed[pg.K_s]:
+            self.coord.y += self.speed
+            self.facing = 1
+
+
+
+#class Robot(pg.sprite.Sprite):
+#    def __init__(self, idle, walking, cmnd):
+#        super().__init__()
+#        self.idle_animation: AnimatedSprite = idle
+#        self.walking_animation: AnimatedSprite = walking
+#        self.active_animation = self.idle_animation
+#        self.cmnd = cmnd
+#        self.walking = 0
+#        self.updatecnt = 60
+#        self.cnt = 0
+#        self.pos = Vec2(0, 0)
+#        self.orig = Vec2(0, 0)
+#
+#    def set_origin(self, origin: Vec2):
+#        self.orig = origin
+#
+#    def set_scale(self, global_scale=1.0):
+#        #self.idle_animation.set_scale(global_scale)
+#        #self.walking_animation.set_scale(global_scale)
+#
+#    def update(self, *args):
+#        # We need a better meachnism for handling sprite timings
+#        #if self.cnt >= self.updatecnt:
+#        #    self.cnt = 0
+#        #    self.active_animation.update()
+#        #self.cmnd(self, *args)
+#        #self.cnt += 1
+#
+#    def draw(self, srf):
+#        img = self.active_animation.get()
+#        dst = img.get_rect()
+#        dpos = self.orig + self.pos
+#        dst.x = int(dpos.x)
+#        dst.y = int(dpos.y)
+#        srf.blit(img, dst)
 
 
 Game().run()
